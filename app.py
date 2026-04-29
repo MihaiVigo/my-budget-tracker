@@ -4,8 +4,9 @@ from datetime import datetime
 import calendar
 import os
 
-# --- CONFIGURARE FIȘIER ---
+# --- CONFIGURARE FIȘIERE ---
 FILE_NAME = "date_cheltuieli.csv"
+SETTINGS_FILE = "setari.csv"
 
 def incarca_date():
     if os.path.exists(FILE_NAME):
@@ -17,15 +18,30 @@ def incarca_date():
 def salveaza_date(df):
     df.to_csv(FILE_NAME, index=False)
 
+def incarca_setari():
+    if os.path.exists(SETTINGS_FILE):
+        return pd.read_csv(SETTINGS_FILE).iloc[0]['venit_luna']
+    return 3100.0  # Valoare de backup
+
+def salveaza_setari(valoare):
+    df_setari = pd.DataFrame({'venit_luna': [valoare]})
+    df_setari.to_csv(SETTINGS_FILE, index=False)
+
 # --- INTERFAȚA ---
 st.set_page_config(page_title="Buget Tracker Secvențial", layout="centered")
 st.title("💰 Tracker Buget cu Reportare")
 
-# 1. SETĂRI BUGET
+# 1. SETĂRI BUGET (Acum se salvează!)
+venit_memorat = incarca_setari()
+
 with st.expander("⚙️ Setări Buget", expanded=False):
     col_a, col_b = st.columns(2)
     with col_a:
-        venit_luna = st.number_input("Suma totală lună (RON):", value=3100.0)
+        venit_luna = st.number_input("Suma totală lună (RON):", value=float(venit_memorat))
+        if st.button("Salvează Suma"):
+            salveaza_setari(venit_luna)
+            st.success("Sumă salvată!")
+            st.rerun()
     with col_b:
         data_now = datetime.now()
         zile_luna = calendar.monthrange(data_now.year, data_now.month)[1]
@@ -45,7 +61,6 @@ with st.form("add_form", clear_on_submit=True):
     with col_d:
         desc = st.text_input("Descriere:")
     
-    # Opțiune de a alege data (pentru a putea introduce cheltuieli din zile trecute)
     data_input = st.date_input("Data cheltuielii:", data_now)
     submit = st.form_submit_button("Salvează cheltuiala")
 
@@ -59,20 +74,15 @@ with st.form("add_form", clear_on_submit=True):
         salveaza_date(df_cheltuieli)
         st.rerun()
 
-# 4. LOGICA DE CALCUL SECVENȚIALĂ (Logica ta)
-# Calculăm soldul reportat de la ziua 1 până la ziua de ieri
+# 4. LOGICA DE CALCUL SECVENȚIALĂ
 ziua_curenta_nr = data_now.day
 sold_reportat = 0.0
 
-# Parcurgem fiecare zi de la începutul lunii până ieri
 for zi in range(1, ziua_curenta_nr):
     data_zi = data_now.replace(day=zi).strftime('%Y-%m-%d')
-    # Cheltuieli în acea zi specifică
     cheltuieli_zi = df_cheltuieli[df_cheltuieli['data'].dt.strftime('%Y-%m-%d') == data_zi]['suma'].sum()
-    # Soldul zilei respective se adaugă la ce am reportat deja
     sold_reportat = (sold_reportat + buget_fix_zi) - cheltuieli_zi
 
-# Soldul disponibil pentru ziua de azi
 cheltuieli_azi = df_cheltuieli[df_cheltuieli['data'].dt.strftime('%Y-%m-%d') == data_now.strftime('%Y-%m-%d')]['suma'].sum()
 sold_disponibil_azi = (buget_fix_zi + sold_reportat) - cheltuieli_azi
 
@@ -85,9 +95,9 @@ c1.metric("Sold Disponibil AZI", f"{sold_disponibil_azi:.2f} RON")
 c2.metric("Reportat din zile trecute", f"{sold_reportat:.2f} RON")
 
 if sold_disponibil_azi < 0:
-    st.error(f"Ai depășit bugetul! Diferența de {abs(sold_disponibil_azi):.2f} RON va fi trasă din ziua de mâine.")
+    st.error(f"Ai depășit bugetul!")
 else:
-    st.success(f"Ești în grafic. Mâine vei începe cu {sold_disponibil_azi:.2f} + {buget_fix_zi:.2f} RON (dacă nu mai cheltuiești nimic azi).")
+    st.success(f"Ești în grafic.")
 
 # 6. ISTORIC
 if not df_cheltuieli.empty:
