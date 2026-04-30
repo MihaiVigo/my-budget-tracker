@@ -5,7 +5,7 @@ from datetime import datetime
 import calendar
 
 # --- CONFIGURARE PAGINĂ ---
-st.set_page_config(page_title="Buget Tracker Privat", layout="centered")
+st.set_page_config(page_title="Buget Tracker Cloud", layout="centered")
 
 # --- 1. SISTEM DE AUTENTIFICARE ---
 def verifica_parola():
@@ -16,7 +16,7 @@ def verifica_parola():
         st.title("🔒 Acces Restrâns")
         parola = st.text_input("Introdu parola:", type="password")
         if st.button("Logare"):
-            if parola == "<vta2947>":  # SCHIMBĂ ACEASTĂ PAROLĂ
+            if parola == "secret123":  # SCHIMBĂ ACEASTĂ PAROLĂ
                 st.session_state["autentificat"] = True
                 st.rerun()
             else:
@@ -26,31 +26,44 @@ def verifica_parola():
 
 if verifica_parola():
     # --- 2. CONECTARE GOOGLE SHEETS ---
-    # URL-ul foii tale (înlocuiește cu link-ul tău real)
-    url_sheet = "https://docs.google.com/spreadsheets/d/180T57Mv1ba4Qt4X8XVjG6SwN7gg3tRcbHpEo6YPad2w/edit?usp=sharing"
-    
+    url_sheet = "https://docs.google.com/spreadsheets/d/ID_UL_TAU_AICI/edit#gid=0"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    def incarca_date():
-        try:
-            return conn.read(spreadsheet=url_sheet, usecols=[0,1,2])
-        except:
-            return pd.DataFrame(columns=['data', 'suma', 'descriere'])
+    # Funcție pentru încărcare date din tab-uri specifice
+    def incarca_date(nume_sheet):
+        return conn.read(spreadsheet=url_sheet, worksheet=nume_sheet)
 
-    df_cheltuieli = incarca_date()
-    # Forțăm conversia datei
+    # Încărcăm cheltuielile și setările
+    df_cheltuieli = incarca_date("Sheet1")
     df_cheltuieli['data'] = pd.to_datetime(df_cheltuieli['data'], errors='coerce')
+    
+    df_setari = incarca_date("Setari")
+    
+    # Luăm venitul din Sheets (dacă e gol, punem 3100 implicit)
+    try:
+        venit_actual = int(df_setari.iloc[0]['venit_luna'])
+    except:
+        venit_actual = 3100
 
     # --- INTERFAȚĂ ---
-    st.title("💰 Tracker Buget (Google Sheets)")
+    st.title("💰 Tracker Buget Cloud")
 
-    # Setări venit (le păstrăm în session_state sau poți face altă foaie)
-    venit_luna = st.sidebar.number_input("Venit lunar (RON):", value=3100)
+    # 3. SETARE VENIT LUNAR (Se salvează în foaia Setari)
+    with st.expander("⚙️ Modifică Venitul pe Luna Aceasta", expanded=False):
+        nou_venit = st.number_input("Suma totală (RON):", value=venit_actual, step=100)
+        if st.button("Salvează Venit"):
+            df_setari_nou = pd.DataFrame({'venit_luna': [nou_venit]})
+            conn.update(spreadsheet=url_sheet, worksheet="Setari", data=df_setari_nou)
+            st.success(f"Venit actualizat: {nou_venit} RON")
+            st.rerun()
+
     data_now = datetime.now()
     zile_luna = calendar.monthrange(data_now.year, data_now.month)[1]
-    buget_fix_zi = int(venit_luna / zile_luna)
+    buget_fix_zi = int(venit_actual / zile_luna)
+    
+    st.info(f"Buget bazat pe un venit de {venit_actual} RON: **{buget_fix_zi} RON / zi**")
 
-    # --- 3. FORMULAR ADAUGARE ---
+    # --- 4. FORMULAR ADAUGARE CHELTUIELI ---
     with st.form("add_form", clear_on_submit=True):
         col_s, col_d = st.columns([1, 2])
         with col_s:
@@ -58,7 +71,7 @@ if verifica_parola():
         with col_d:
             desc = st.text_input("Descriere:")
         data_input = st.date_input("Data:", data_now)
-        submit = st.form_submit_button("Adaugă în Google Sheets")
+        submit = st.form_submit_button("Adaugă Cheltuială")
 
         if submit and suma > 0:
             noua_intrare = pd.DataFrame({
@@ -66,20 +79,20 @@ if verifica_parola():
                 'suma': [int(suma)],
                 'descriere': [desc]
             })
-            # Concatenăm și salvăm înapoi în Cloud
             updated_df = pd.concat([df_cheltuieli, noua_intrare], ignore_index=True)
-            conn.update(spreadsheet=url_sheet, data=updated_df)
-            st.success("Date salvate în Google Sheets!")
+            conn.update(spreadsheet=url_sheet, worksheet="Sheet1", data=updated_df)
+            st.success("Salvat!")
             st.rerun()
 
-    # --- 4. LOGICA DE CALCUL ---
+    # --- 5. LOGICA DE CALCUL ---
     ziua_curenta_nr = data_now.day
     sold_reportat = 0
 
     for zi in range(1, ziua_curenta_nr):
         data_zi = datetime(data_now.year, data_now.month, zi).date()
         if not df_cheltuieli.empty:
-            cheltuieli_zi = int(df_cheltuieli[df_cheltuieli['data'].dt.date == data_zi]['suma'].sum())
+            mask = df_cheltuieli['data'].dt.date == data_zi
+            cheltuieli_zi = int(df_cheltuieli[mask]['suma'].sum())
         else:
             cheltuieli_zi = 0
         sold_reportat = (sold_reportat + buget_fix_zi) - cheltuieli_zi
@@ -90,7 +103,7 @@ if verifica_parola():
 
     sold_disponibil_azi = int((buget_fix_zi + sold_reportat) - cheltuieli_azi)
 
-    # AFIȘARE REZULTATE
+    # --- 6. AFIȘARE VIZIBILĂ ---
     st.divider()
     if sold_disponibil_azi >= 0:
         st.success(f"### SOLD DISPONIBIL AZI: {sold_disponibil_azi} RON")
@@ -98,13 +111,13 @@ if verifica_parola():
         st.error(f"### SOLD DISPONIBIL AZI: {sold_disponibil_azi} RON")
 
     col1, col2 = st.columns(2)
-    col1.metric("Din zile trecute", f"{sold_reportat} RON")
+    col1.metric("Economisiri / Reportat", f"{sold_reportat} RON")
     col2.metric("Cheltuit azi", f"{cheltuieli_azi} RON")
 
     # ISTORIC
     if not df_cheltuieli.empty:
         st.divider()
-        st.subheader("📜 Istoric din Cloud")
+        st.subheader("📜 Istoric Tranzacții")
         df_vis = df_cheltuieli.copy()
         df_vis['data'] = df_vis['data'].dt.strftime('%d-%m-%Y')
         st.dataframe(df_vis.sort_index(ascending=False), use_container_width=True)
