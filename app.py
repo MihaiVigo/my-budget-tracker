@@ -10,9 +10,15 @@ SETTINGS_FILE = "setari.csv"
 
 def incarca_date():
     if os.path.exists(FILE_NAME):
-        df = pd.read_csv(FILE_NAME)
-        df['data'] = pd.to_datetime(df['data'])
-        return df
+        try:
+            df = pd.read_csv(FILE_NAME)
+            # Conversie robustă: erorile devin NaT (Not a Time), apoi le ștergem
+            df['data'] = pd.to_datetime(df['data'], errors='coerce')
+            df = df.dropna(subset=['data'])
+            return df
+        except Exception as e:
+            st.error(f"Eroare la citirea fișierului: {e}")
+            return pd.DataFrame(columns=['data', 'suma', 'descriere'])
     return pd.DataFrame(columns=['data', 'suma', 'descriere'])
 
 def salveaza_date(df):
@@ -36,6 +42,7 @@ st.title("💰 Tracker Buget")
 
 # 1. SETĂRI BUGET
 venit_memorat = incarca_setari()
+data_now = datetime.now()
 
 with st.expander("⚙️ Setări", expanded=False):
     col_a, col_b = st.columns(2)
@@ -46,11 +53,10 @@ with st.expander("⚙️ Setări", expanded=False):
             st.success("Salvat!")
             st.rerun()
     with col_b:
-        data_now = datetime.now()
         zile_luna = calendar.monthrange(data_now.year, data_now.month)[1]
         nr_zile = st.number_input("Zile în lună:", value=int(zile_luna), step=1)
     
-    buget_fix_zi = int(venit_luna / nr_zile)
+    buget_fix_zi = int(venit_luna / nr_zile) if nr_zile > 0 else 0
     st.info(f"Buget fix: {buget_fix_zi} RON / zi")
 
 # 2. DATE
@@ -77,22 +83,28 @@ with st.form("add_form", clear_on_submit=True):
         salveaza_date(df_cheltuieli)
         st.rerun()
 
-# 4. LOGICA DE CALCUL
+# 4. LOGICA DE CALCUL (CORECȚIE ATTRIBUTE ERROR)
 ziua_curenta_nr = data_now.day
 sold_reportat = 0
 
+# Ne asigurăm că avem coloana 'data' în format Datetime pentru calcule
+if not df_cheltuieli.empty:
+    df_cheltuieli['data'] = pd.to_datetime(df_cheltuieli['data'])
+
+# Calculăm soldul adunat din zilele trecute
 for zi in range(1, ziua_curenta_nr):
-    data_zi = data_now.replace(day=zi).strftime('%Y-%m-%d')
-    cheltuieli_zi = int(df_cheltuieli[df_cheltuieli['data'].dt.strftime('%Y-%m-%d') == data_zi]['suma'].sum())
+    data_zi_target = datetime(data_now.year, data_now.month, zi).date()
+    # Filtrare folosind .dt.date pentru comparație sigură
+    cheltuieli_zi = int(df_cheltuieli[df_cheltuieli['data'].dt.date == data_zi_target]['suma'].sum())
     sold_reportat = (sold_reportat + buget_fix_zi) - cheltuieli_zi
 
-cheltuieli_azi = int(df_cheltuieli[df_cheltuieli['data'].dt.strftime('%Y-%m-%d') == data_now.strftime('%Y-%m-%d')]['suma'].sum())
+# Calculăm cheltuielile de azi
+cheltuieli_azi = int(df_cheltuieli[df_cheltuieli['data'].dt.date == data_now.date()]['suma'].sum())
 sold_disponibil_azi = int((buget_fix_zi + sold_reportat) - cheltuieli_azi)
 
 # 5. AFIȘARE VIZIBILĂ
 st.divider()
 
-# Formatare simplă și de impact
 if sold_disponibil_azi >= 0:
     st.success(f"### SOLD DISPONIBIL AZI: {sold_disponibil_azi} RON")
 else:
@@ -106,14 +118,19 @@ col2.metric("Cheltuit azi", f"{int(cheltuieli_azi)} RON")
 if not df_cheltuieli.empty:
     st.divider()
     st.subheader("📜 Istoric")
+    
+    # Pregătim tabelul pentru afișare fără a modifica datele originale
     df_vis = df_cheltuieli.copy()
     df_vis['data'] = df_vis['data'].dt.strftime('%d-%m-%Y')
     df_vis['suma'] = df_vis['suma'].astype(int)
-    st.dataframe(df_vis.sort_values(by='data', ascending=False), use_container_width=True)
+    
+    # Afișăm tabelul cu ID (index) vizibil pentru a știi ce ștergem
+    st.dataframe(df_vis.sort_index(ascending=False), use_container_width=True)
 
-    with st.expander("🗑️ Șterge"):
-        idx = st.number_input("ID:", min_value=0, max_value=len(df_cheltuieli)-1, step=1)
-        if st.button("Confirmă"):
-            df_cheltuieli = df_cheltuieli.drop(df_cheltuieli.index[idx])
+    with st.expander("🗑️ Șterge o înregistrare"):
+        idx_de_sters = st.number_input("Introdu ID-ul (indexul) de șters:", min_value=0, max_value=int(df_cheltuieli.index.max()) if not df_cheltuieli.empty else 0, step=1)
+        if st.button("Confirmă Ștergerea"):
+            df_cheltuieli = df_cheltuieli.drop(idx_de_sters)
             salveaza_date(df_cheltuieli)
+            st.success(f"Înregistrarea {idx_de_sters} a fost ștearsă.")
             st.rerun()
