@@ -4,14 +4,12 @@ import requests
 from datetime import datetime
 
 # --- CONFIGURARE ---
-# AICI lipești URL-ul copiat de pe SheetDB la Pasul 2
+# Înlocuiește cu URL-ul tău de pe SheetDB.io
 BASE_API_URL = "https://sheetdb.io/api/v1/ID_UL_TAU_AICI"
 
-st.set_page_config(page_title="Buget Tracker Multi-Sheet", layout="wide")
+st.set_page_config(page_title="Buget Tracker", layout="wide")
 
-# --- FUNCȚII COMUNICARE ---
 def incarca_date(nume_tab):
-    """Citește datele dintr-un tab specific (venituri sau cheltuieli)"""
     url = f"{BASE_API_URL}?sheet={nume_tab}"
     try:
         response = requests.get(url)
@@ -21,80 +19,51 @@ def incarca_date(nume_tab):
         pass
     return pd.DataFrame()
 
-def trimite_date(nume_tab, data_str, suma_val, desc_val):
-    """Trimite date noi către tab-ul specificat"""
+def trimite_date(nume_tab, data, suma, desc):
     url = f"{BASE_API_URL}?sheet={nume_tab}"
-    payload = {
-        "data": [{
-            "data": data_str,
-            "suma": suma_val,
-            "descriere": desc_val
-        }]
-    }
+    payload = {"data": [{"data": data, "suma": suma, "descriere": desc}]}
     res = requests.post(url, json=payload)
     return res.status_code == 201
 
-# --- INTERFAȚĂ UTILIZATOR ---
-st.title("💰 Gestiune Finanțe: Venituri și Cheltuieli")
+st.title("💰 Gestiune Finanțe (Venituri & Cheltuieli)")
 
-# Sidebar pentru introducere date
+# Introducere date
 with st.sidebar:
-    st.header("Adaugă Tranzacție Nouă")
-    tip_alest = st.radio("Ce dorești să adaugi?", ["Cheltuială", "Venit"])
-    
-    # Mapăm selecția pe numele tab-urilor din Google Sheets
-    tab_destinatie = "cheltuieli" if tip_alest == "Cheltuială" else "venituri"
+    st.header("Adaugă Tranzacție")
+    tip = st.radio("Tip:", ["Cheltuială", "Venit"])
+    # Mapare pe numele tab-urilor
+    tab_dest = "cheltuieli" if tip == "Cheltuială" else "venituri"
     
     with st.form("entry_form", clear_on_submit=True):
         f_data = st.date_input("Data:", datetime.now())
-        f_suma = st.number_input("Suma (RON):", min_value=0.0, step=1.0)
+        f_suma = st.number_input("Suma:", min_value=0.0)
         f_desc = st.text_input("Descriere:")
-        
-        if st.form_submit_button(f"Salvează în {tab_destinatie}"):
+        if st.form_submit_button("Salvează"):
             if f_suma > 0:
-                succes = trimite_date(tab_destinatie, f_data.strftime("%Y-%m-%d"), f_suma, f_desc)
-                if succes:
-                    st.success(f"Înregistrat cu succes în {tab_destinatie}!")
+                if trimite_date(tab_dest, f_data.strftime("%Y-%m-%d"), f_suma, f_desc):
+                    st.success(f"Salvat în {tab_dest}!")
                     st.rerun()
                 else:
-                    st.error("Eroare la comunicarea cu Google Sheets.")
-            else:
-                st.warning("Te rugăm să introduci o sumă validă.")
+                    st.error("Eroare la comunicarea cu SheetDB.")
 
-# --- LOGICA DE CALCUL ȘI AFIȘARE ---
-# Încărcăm datele din ambele tab-uri
-df_venituri = incarca_date("venituri")
-df_cheltuieli = incarca_date("cheltuieli")
+# Calcule și Afișare
+df_v = incarca_date("venituri")
+df_c = incarca_date("cheltuieli")
 
-# Calculăm totalurile (asigurându-ne că sumele sunt numere)
-total_v = pd.to_numeric(df_venituri['suma'], errors='coerce').sum() if not df_venituri.empty else 0.0
-total_c = pd.to_numeric(df_cheltuieli['suma'], errors='coerce').sum() if not df_cheltuieli.empty else 0.0
-sold_actual = total_v - total_c
+# Conversie sume la numere
+v_val = pd.to_numeric(df_v['suma'], errors='coerce').sum() if not df_v.empty else 0.0
+c_val = pd.to_numeric(df_c['suma'], errors='coerce').sum() if not df_c.empty else 0.0
 
-# Afișare panou indicatori
 c1, c2, c3 = st.columns(3)
-c1.metric("Venituri Totale", f"{total_v:,.2f} RON")
-c2.metric("Cheltuieli Totale", f"{total_c:,.2f} RON", delta_color="inverse")
-c3.metric("Sold Disponibil", f"{sold_actual:,.2f} RON")
+c1.metric("Total Venituri", f"{v_val:,.2f} RON")
+c2.metric("Total Cheltuieli", f"{c_val:,.2f} RON")
+c3.metric("Sold Actual", f"{v_val - c_val:,.2f} RON")
 
 st.divider()
-
-# Afișare tabele în coloane
-col_v, col_c = st.columns(2)
-
-with col_v:
+col1, col2 = st.columns(2)
+with col1:
     st.subheader("📋 Istoric Venituri")
-    if not df_venituri.empty:
-        st.dataframe(df_venituri.iloc[::-1], use_container_width=True) # Ultimele adăugate apar primele
-    else:
-        st.info("Nu sunt venituri înregistrate.")
-
-with col_c:
+    st.dataframe(df_v, use_container_width=True)
+with col2:
     st.subheader("💸 Istoric Cheltuieli")
-    if not df_cheltuieli.empty:
-        st.dataframe(df_cheltuieli.iloc[::-1], use_container_width=True)
-    else:
-        st.info("Nu sunt cheltuieli înregistrate.")
-
-if st.button("🔄 Actualizează Datele"):
-    st.rerun()
+    st.dataframe(df_c, use_container_width=True)
