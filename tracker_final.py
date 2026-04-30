@@ -6,7 +6,7 @@ from datetime import datetime
 # --- CONFIGURARE ---
 # Pune aici URL-ul tău de la SheetDB.io
 # Exemplu: https://sheetdb.io/api/v1/abcd123456789
-BASE_API_URL = "https://sheetdb.io/api/v1/ID_UL_TAU_AICI"
+BASE_API_URL = "https://sheetdb.io/api/v1/zjfuwwvgqximb"
 
 st.set_page_config(page_title="Buget Tracker Pro", layout="wide")
 
