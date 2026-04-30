@@ -12,12 +12,10 @@ def incarca_date():
     if os.path.exists(FILE_NAME):
         try:
             df = pd.read_csv(FILE_NAME)
-            # Conversie robustă: erorile devin NaT (Not a Time), apoi le ștergem
+            # Conversie de bază la încărcare
             df['data'] = pd.to_datetime(df['data'], errors='coerce')
-            df = df.dropna(subset=['data'])
-            return df
-        except Exception as e:
-            st.error(f"Eroare la citirea fișierului: {e}")
+            return df.dropna(subset=['data'])
+        except:
             return pd.DataFrame(columns=['data', 'suma', 'descriere'])
     return pd.DataFrame(columns=['data', 'suma', 'descriere'])
 
@@ -74,6 +72,7 @@ with st.form("add_form", clear_on_submit=True):
     submit = st.form_submit_button("Adaugă")
 
     if submit and suma > 0:
+        # Creăm intrarea nouă asigurându-ne că data este datetime
         noua_intrare = pd.DataFrame({
             'data': [pd.to_datetime(data_input)],
             'suma': [int(suma)],
@@ -83,26 +82,33 @@ with st.form("add_form", clear_on_submit=True):
         salveaza_date(df_cheltuieli)
         st.rerun()
 
-# 4. LOGICA DE CALCUL (CORECȚIE ATTRIBUTE ERROR)
+# --- 4. LOGICA DE CALCUL (SOLUȚIA FINALĂ PENTRU EROARE) ---
 ziua_curenta_nr = data_now.day
 sold_reportat = 0
 
-# Ne asigurăm că avem coloana 'data' în format Datetime pentru calcule
-if not df_cheltuieli.empty:
-    df_cheltuieli['data'] = pd.to_datetime(df_cheltuieli['data'])
+# ASIGURARE CRITICĂ: Forțăm coloana să fie datetime înainte de orice calcul .dt
+df_cheltuieli['data'] = pd.to_datetime(df_cheltuieli['data'], errors='coerce')
 
-# Calculăm soldul adunat din zilele trecute
+# Calculăm soldul reportat (zilele trecute)
 for zi in range(1, ziua_curenta_nr):
     data_zi_target = datetime(data_now.year, data_now.month, zi).date()
-    # Filtrare folosind .dt.date pentru comparație sigură
-    cheltuieli_zi = int(df_cheltuieli[df_cheltuieli['data'].dt.date == data_zi_target]['suma'].sum())
+    # Verificăm dacă df nu e gol pentru a evita erori la filtrare
+    if not df_cheltuieli.empty:
+        mask = df_cheltuieli['data'].dt.date == data_zi_target
+        cheltuieli_zi = int(df_cheltuieli[mask]['suma'].sum())
+    else:
+        cheltuieli_zi = 0
     sold_reportat = (sold_reportat + buget_fix_zi) - cheltuieli_zi
 
 # Calculăm cheltuielile de azi
-cheltuieli_azi = int(df_cheltuieli[df_cheltuieli['data'].dt.date == data_now.date()]['suma'].sum())
+if not df_cheltuieli.empty:
+    cheltuieli_azi = int(df_cheltuieli[df_cheltuieli['data'].dt.date == data_now.date()]['suma'].sum())
+else:
+    cheltuieli_azi = 0
+
 sold_disponibil_azi = int((buget_fix_zi + sold_reportat) - cheltuieli_azi)
 
-# 5. AFIȘARE VIZIBILĂ
+# 5. AFIȘARE
 st.divider()
 
 if sold_disponibil_azi >= 0:
@@ -118,19 +124,13 @@ col2.metric("Cheltuit azi", f"{int(cheltuieli_azi)} RON")
 if not df_cheltuieli.empty:
     st.divider()
     st.subheader("📜 Istoric")
-    
-    # Pregătim tabelul pentru afișare fără a modifica datele originale
     df_vis = df_cheltuieli.copy()
     df_vis['data'] = df_vis['data'].dt.strftime('%d-%m-%Y')
-    df_vis['suma'] = df_vis['suma'].astype(int)
-    
-    # Afișăm tabelul cu ID (index) vizibil pentru a știi ce ștergem
     st.dataframe(df_vis.sort_index(ascending=False), use_container_width=True)
 
-    with st.expander("🗑️ Șterge o înregistrare"):
-        idx_de_sters = st.number_input("Introdu ID-ul (indexul) de șters:", min_value=0, max_value=int(df_cheltuieli.index.max()) if not df_cheltuieli.empty else 0, step=1)
-        if st.button("Confirmă Ștergerea"):
-            df_cheltuieli = df_cheltuieli.drop(idx_de_sters)
+    with st.expander("🗑️ Șterge"):
+        idx = st.number_input("ID de șters:", min_value=0, max_value=int(df_cheltuieli.index.max()), step=1)
+        if st.button("Confirmă"):
+            df_cheltuieli = df_cheltuieli.drop(idx)
             salveaza_date(df_cheltuieli)
-            st.success(f"Înregistrarea {idx_de_sters} a fost ștearsă.")
             st.rerun()
