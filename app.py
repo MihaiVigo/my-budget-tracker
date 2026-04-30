@@ -4,10 +4,10 @@ import requests
 from datetime import datetime
 
 # --- CONFIGURARE ---
-# Înlocuiește cu URL-ul tău de pe SheetDB.io
+# Pune aici URL-ul API de la SheetDB.io
 BASE_API_URL = "https://sheetdb.io/api/v1/ID_UL_TAU_AICI"
 
-st.set_page_config(page_title="Buget Tracker", layout="wide")
+st.set_page_config(page_title="Buget Tracker v2", layout="wide")
 
 def incarca_date(nume_tab):
     url = f"{BASE_API_URL}?sheet={nume_tab}"
@@ -25,45 +25,48 @@ def trimite_date(nume_tab, data, suma, desc):
     res = requests.post(url, json=payload)
     return res.status_code == 201
 
-st.title("💰 Gestiune Finanțe (Venituri & Cheltuieli)")
+st.title("💰 Tracker Finanțe Personale")
 
-# Introducere date
+# Meniu Lateral
 with st.sidebar:
-    st.header("Adaugă Tranzacție")
-    tip = st.radio("Tip:", ["Cheltuială", "Venit"])
-    # Mapare pe numele tab-urilor
+    st.header("Introducere Date")
+    tip = st.radio("Tip tranzacție:", ["Cheltuială", "Venit"])
     tab_dest = "cheltuieli" if tip == "Cheltuială" else "venituri"
     
-    with st.form("entry_form", clear_on_submit=True):
+    with st.form("form_intrare", clear_on_submit=True):
         f_data = st.date_input("Data:", datetime.now())
-        f_suma = st.number_input("Suma:", min_value=0.0)
+        f_suma = st.number_input("Suma (RON):", min_value=0.0)
         f_desc = st.text_input("Descriere:")
-        if st.form_submit_button("Salvează"):
+        
+        if st.form_submit_button("Salvează Datele"):
             if f_suma > 0:
-                if trimite_date(tab_dest, f_data.strftime("%Y-%m-%d"), f_suma, f_desc):
-                    st.success(f"Salvat în {tab_dest}!")
+                data_str = f_data.strftime("%Y-%m-%d")
+                if trimite_date(tab_dest, data_str, f_suma, f_desc):
+                    st.success(f"Înregistrat în {tab_dest}!")
                     st.rerun()
                 else:
-                    st.error("Eroare la comunicarea cu SheetDB.")
+                    st.error("Eroare la API SheetDB.")
 
-# Calcule și Afișare
+# Încărcare și Calcule
 df_v = incarca_date("venituri")
 df_c = incarca_date("cheltuieli")
 
-# Conversie sume la numere
-v_val = pd.to_numeric(df_v['suma'], errors='coerce').sum() if not df_v.empty else 0.0
-c_val = pd.to_numeric(df_c['suma'], errors='coerce').sum() if not df_c.empty else 0.0
+v_total = pd.to_numeric(df_v['suma'], errors='coerce').sum() if not df_v.empty else 0.0
+c_total = pd.to_numeric(df_c['suma'], errors='coerce').sum() if not df_c.empty else 0.0
 
+# Afișare Metrics
 c1, c2, c3 = st.columns(3)
-c1.metric("Total Venituri", f"{v_val:,.2f} RON")
-c2.metric("Total Cheltuieli", f"{c_val:,.2f} RON")
-c3.metric("Sold Actual", f"{v_val - c_val:,.2f} RON")
+c1.metric("Venituri", f"{v_total:,.2f} RON")
+c2.metric("Cheltuieli", f"{c_total:,.2f} RON", delta_color="inverse")
+c3.metric("Sold Actual", f"{v_total - c_total:,.2f} RON")
 
 st.divider()
-col1, col2 = st.columns(2)
-with col1:
+
+# Tabele
+col_v, col_c = st.columns(2)
+with col_v:
     st.subheader("📋 Istoric Venituri")
     st.dataframe(df_v, use_container_width=True)
-with col2:
+with col_c:
     st.subheader("💸 Istoric Cheltuieli")
     st.dataframe(df_c, use_container_width=True)
