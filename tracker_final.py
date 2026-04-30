@@ -7,7 +7,7 @@ import calendar
 # --- CONFIGURARE API ---
 BASE_API_URL = "https://sheetdb.io/api/v1/zjfuwwvgqximb"
 
-st.set_page_config(page_title="Buget Pro - Control Total", layout="wide")
+st.set_page_config(page_title="Buget Pro - Resetabil", layout="wide")
 
 # --- FUNCȚII COMUNICARE ---
 def incarca_date(nume_tab):
@@ -26,16 +26,8 @@ def trimite_date(nume_tab, data, suma, desc):
     res = requests.post(url, json=payload)
     return res.status_code == 201
 
-def sterge_rand(nume_tab, coloana, valoare):
-    # Atenție: SheetDB șterge TOATE rândurile care se potrivesc cu acea valoare
-    url = f"{BASE_API_URL}/{coloana}/{valoare}?sheet={nume_tab}"
-    res = requests.delete(url)
-    return res.status_code == 200
-
 def curata_tot_tabelul(nume_tab):
-    """Șterge toate datele dintr-un tab (SheetDB necesită o abordare specifică)"""
-    # Se șterge tot conținutul prin metoda DELETE generală dacă API-ul permite, 
-    # sau rând cu rând. Cea mai sigură metodă SheetDB: șterge unde suma e mai mare de -1
+    """Șterge toate datele dintr-un tab folosind un query de tip 'mai mare de -1'"""
     url = f"{BASE_API_URL}/suma/>/-1?sheet={nume_tab}"
     res = requests.delete(url)
     return res.status_code == 200
@@ -51,13 +43,13 @@ total_cheltuieli = int(pd.to_numeric(df_c['suma'], errors='coerce').sum()) if no
 with st.sidebar:
     st.title("⚙️ Administrare")
 
-    # 1. Configurare Lună - ASCUNS
+    # 1. Configurare Timp
     with st.expander("📅 Configurare Timp", expanded=False):
         data_selectata = st.date_input("Data de azi:", date.today())
         ultimul_zi_luna = calendar.monthrange(data_selectata.year, data_selectata.month)[1]
         nr_zile_luna = st.number_input("Zile totale în lună:", min_value=1, value=ultimul_zi_luna)
     
-    # 2. Adaugă Venit Nou - ASCUNS
+    # 2. Adaugă Venit Nou
     with st.expander("💵 Adaugă Venit Nou", expanded=False):
         with st.form("venit_nou", clear_on_submit=True):
             v_suma = st.number_input("Sumă venit (RON):", min_value=0, step=100)
@@ -79,18 +71,17 @@ with st.sidebar:
 
     st.divider()
     
-    # 4. RESET LUNA NOUA - Secțiune nouă de curățare
-    with st.expander("🚨 Gestionare Bază de Date"):
-        st.warning("Aceste acțiuni sunt ireversibile!")
-        if st.button("Clear ALL Venituri"):
-            if curata_tot_tabelul("venituri"):
-                st.success("Venituri șterse!")
-                st.rerun()
-        
-        if st.button("Clear ALL Cheltuieli"):
-            if curata_tot_tabelul("cheltuieli"):
-                st.success("Cheltuieli șterse!")
-                st.rerun()
+    # 4. RESET TOTAL (Funcția care a confirmat că merge)
+    st.subheader("🚨 Resetare Date")
+    if st.button("Șterge Toate VENITURILE"):
+        if curata_tot_tabelul("venituri"):
+            st.success("Tabelul de venituri a fost golit!")
+            st.rerun()
+            
+    if st.button("Șterge Toate CHELTUIELILE"):
+        if curata_tot_tabelul("cheltuieli"):
+            st.success("Tabelul de cheltuieli a fost golit!")
+            st.rerun()
 
 # --- CALCUL LOGIC ---
 ziua_nr = data_selectata.day
@@ -101,6 +92,7 @@ sold_disponibil_azi = buget_teoretic_pana_azi - total_cheltuieli
 # --- AFIȘARE REZULTATE ---
 st.title("⚖️ Status Buget Zilnic")
 
+# Afișare buget principal
 if sold_disponibil_azi >= 0:
     st.success(f"## Buget Disponibil Azi: {sold_disponibil_azi} RON")
 else:
@@ -108,33 +100,22 @@ else:
 
 st.divider()
 
-# Tabele gestionare
-tab1, tab2 = st.tabs(["💸 Cheltuieli", "📋 Venituri"])
+# Tabele de vizualizare simplă
+col1, col2 = st.columns(2)
 
-with tab1:
-    st.subheader("Gestionare Cheltuieli")
-    if not df_c.empty:
-        for i, row in df_c.iterrows():
-            c1, c2, c3, c4 = st.columns([2, 3, 2, 1])
-            c1.write(row['data'])
-            c2.write(row['descriere'])
-            c3.write(f"**{int(float(row['suma']))} RON**")
-            if c4.button("❌", key=f"del_c_{i}"):
-                sterge_rand("cheltuieli", "descriere", row['descriere'])
-                st.rerun()
-    else:
-        st.info("Nicio cheltuială.")
-
-with tab2:
-    st.subheader("Gestionare Venituri")
+with col1:
+    st.subheader("📋 Venituri")
     if not df_v.empty:
-        for i, row in df_v.iterrows():
-            v1, v2, v3, v4 = st.columns([2, 3, 2, 1])
-            v1.write(row['data'])
-            v2.write(row['descriere'])
-            v3.write(f"**{int(float(row['suma']))} RON**")
-            if v4.button("❌", key=f"del_v_{i}"):
-                sterge_rand("venituri", "descriere", row['descriere'])
-                st.rerun()
+        st.dataframe(df_v[['data', 'descriere', 'suma']], use_container_width=True)
     else:
-        st.info("Niciun venit.")
+        st.caption("Niciun venit salvat.")
+
+with col2:
+    st.subheader("💸 Cheltuieli")
+    if not df_c.empty:
+        st.dataframe(df_c[['data', 'descriere', 'suma']], use_container_width=True)
+    else:
+        st.caption("Nicio cheltuială salvată.")
+
+st.divider()
+st.caption(f"Venit total: {total_venituri} RON | Cheltuieli totale: {total_cheltuieli} RON | Alocație fixă: {alocatie_zilnica} RON/zi")
