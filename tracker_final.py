@@ -7,17 +7,17 @@ import calendar
 # --- CONFIGURARE API ---
 BASE_API_URL = "https://sheetdb.io/api/v1/zjfuwwvgqximb"
 
-st.set_page_config(page_title="Buget Zilnic Fix + Rollover", layout="wide")
+st.set_page_config(page_title="Buget Stabil", layout="wide")
 
-# --- FUNCȚII COMUNICARE ---
+# --- FUNCȚII ---
 def incarca_date(nume_tab):
     url = f"{BASE_API_URL}?sheet={nume_tab}"
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             return pd.DataFrame(response.json())
-    except Exception as e:
-        st.error(f"Eroare la citire: {e}")
+    except:
+        pass
     return pd.DataFrame()
 
 def trimite_date(nume_tab, data, suma, desc):
@@ -26,90 +26,66 @@ def trimite_date(nume_tab, data, suma, desc):
     res = requests.post(url, json=payload)
     return res.status_code == 201
 
-def sterge_rand(nume_tab, coloana, valoare):
-    url = f"{BASE_API_URL}/{coloana}/{valoare}?sheet={nume_tab}"
-    res = requests.delete(url)
-    return res.status_code == 200
-
-# --- INTERFAȚĂ ---
-st.title("⚖️ Buget Fix cu Reportare Zilnică")
-
-with st.sidebar:
-    st.header("📅 Configurare")
-    data_selectata = st.date_input("Data de azi:", date.today())
-    
-    # Input pentru Venit/Buget lunar pentru a calcula ratia zilnica
-    venit_lunar = st.number_input("Venit lunar total (RON):", min_value=0, value=3000, step=100)
-    ultimul_zi_luna = calendar.monthrange(data_selectata.year, data_selectata.month)[1]
-    nr_zile_luna = st.number_input("Zile în lună:", min_value=1, value=ultimul_zi_luna)
-    
-    # Calculăm alocația fixă pe zi
-    alocatie_zilnica_fixa = int(venit_lunar / nr_zile_luna)
-    st.info(f"Alocația ta fixă este de: **{alocatie_zilnica_fixa} RON / zi**")
-    
-    st.divider()
-    st.header("➕ Adaugă Tranzacție")
-    with st.form("tranzactie_noua", clear_on_submit=True):
-        f_suma = st.number_input("Suma cheltuită (RON):", min_value=0, step=1)
-        f_desc = st.text_input("Descriere cheltuială:")
-        if st.form_submit_button("Salvează Cheltuiala"):
-            if trimite_date("cheltuieli", data_selectata.strftime("%Y-%m-%d"), f_suma, f_desc):
-                st.success("Înregistrat!")
-                st.rerun()
-
-# --- LOGICA DE CALCUL (LOGICA SOLICITATĂ) ---
+# --- LOGICA DE CALCUL ---
+df_v = incarca_date("venituri")
 df_c = incarca_date("cheltuieli")
+
+total_venituri = int(pd.to_numeric(df_v['suma'], errors='coerce').sum()) if not df_v.empty else 0
 total_cheltuieli = int(pd.to_numeric(df_c['suma'], errors='coerce').sum()) if not df_c.empty else 0
 
-# Ziua curentă (din calendar)
+# --- INTERFAȚĂ ---
+st.title("💰 Buget cu Memorare și Venituri Multiple")
+
+with st.sidebar:
+    st.header("⚙️ Configurare Lună")
+    data_selectata = st.date_input("Data de azi:", date.today())
+    ultimul_zi_luna = calendar.monthrange(data_selectata.year, data_selectata.month)[1]
+    nr_zile_luna = st.number_input("Zile totale în lună:", min_value=1, value=ultimul_zi_luna)
+    
+    st.divider()
+    st.header("💵 Adaugă Venit Nou")
+    with st.form("venit_nou", clear_on_submit=True):
+        v_suma = st.number_input("Sumă venit (RON):", min_value=0, step=100)
+        v_desc = st.text_input("Sursa (ex: Salariu, Bonus):")
+        if st.form_submit_button("Salvează Venit"):
+            trimite_date("venituri", data_selectata.strftime("%Y-%m-%d"), v_suma, v_desc)
+            st.rerun()
+
+    st.header("💸 Adaugă Cheltuială")
+    with st.form("cheltuiala_noua", clear_on_submit=True):
+        c_suma = st.number_input("Sumă cheltuită (RON):", min_value=0, step=1)
+        c_desc = st.text_input("Descriere:")
+        if st.form_submit_button("Salvează Cheltuială"):
+            trimite_date("cheltuieli", data_selectata.strftime("%Y-%m-%d"), c_suma, c_desc)
+            st.rerun()
+
+# --- CALCUL LOGIC ---
 ziua_nr = data_selectata.day
 
-# 1. Bugetul total acumulat până azi (ex: Ziua 2 = 100 + 100 = 200)
-buget_total_pana_azi = alocatie_zilnica_fixa * ziua_nr
+# Alocația zilnică medie se calculează din TOTALUL veniturilor introduse până acum
+alocatie_zilnica_medie = int(total_venituri / nr_zile_luna) if total_venituri > 0 else 0
 
-# 2. Soldul zilei = Bugetul cumulat minus TOT ce s-a cheltuit până în prezent
-sold_disponibil_azi = buget_total_pana_azi - total_cheltuieli
+# Bugetul cumulat până în prezent
+buget_teoretic_pana_azi = alocatie_zilnica_medie * ziua_nr
 
-# --- AFIȘARE METRICI ---
-st.subheader(f"Statistici pentru Ziua {ziua_nr} din {nr_zile_luna}")
-c1, c2 = st.columns(2)
+# Soldul disponibil AZI (include reportarea)
+sold_disponibil_azi = buget_teoretic_pana_azi - total_cheltuieli
 
-with c1:
-    st.metric("Alocație Zilnică Fixă", f"{alocatie_zilnica_fixa} RON")
+# --- AFIȘARE ---
+st.info(f"Venit total înregistrat: **{total_venituri} RON** | Alocație: **{alocatie_zilnica_medie} RON / zi**")
 
-with c2:
-    # Colorare în funcție de soldul reportat
-    if sold_disponibil_azi >= 0:
-        color_hex = "#d4edda" # verde deschis
-        text_color = "#155724"
-        st.markdown(f"""
-            <div style="background-color: {color_hex}; padding: 20px; border-radius: 10px; border: 2px solid {text_color};">
-                <h2 style="color: {text_color}; margin: 0;">💰 Buget Disponibil Azi: {sold_disponibil_azi} RON</h2>
-                <p style="margin: 0;">(Include cei {alocatie_zilnica_fixa} RON de azi + economiile reportate)</p>
-            </div>
-        """, unsafe_allow_html=True)
-    else:
-        color_hex = "#f8d7da" # rosu deschis
-        text_color = "#721c24"
-        st.markdown(f"""
-            <div style="background-color: {color_hex}; padding: 20px; border-radius: 10px; border: 2px solid {text_color};">
-                <h2 style="color: {text_color}; margin: 0;">⚠️ Buget Disponibil Azi: {sold_disponibil_azi} RON</h2>
-                <p style="margin: 0;">(Ești pe minus cu {abs(sold_disponibil_azi)} RON față de planul tău)</p>
-            </div>
-        """, unsafe_allow_html=True)
+if sold_disponibil_azi >= 0:
+    st.success(f"### ✅ Buget Disponibil Azi: {sold_disponibil_azi} RON")
+else:
+    st.error(f"### ⚠️ Buget Disponibil Azi: {sold_disponibil_azi} RON (Ești pe minus!)")
 
 st.divider()
 
-# --- GESTIONARE CHELTUIELI ---
-st.subheader("💸 Istoric și Ștergere")
-if not df_c.empty:
-    for i, row in df_c.iterrows():
-        col_dat, col_des, col_sum, col_btn = st.columns([2, 3, 2, 1])
-        col_dat.write(row['data'])
-        col_des.write(row['descriere'])
-        col_sum.write(f"**{int(float(row['suma']))} RON**")
-        if col_btn.button("❌", key=f"del_{i}"):
-            if sterge_rand("cheltuieli", "descriere", row['descriere']):
-                st.rerun()
-else:
-    st.info("Nicio cheltuială înregistrată.")
+# Tabele pentru vizibilitate
+col1, col2 = st.columns(2)
+with col1:
+    st.subheader("📋 Istoric Venituri")
+    st.dataframe(df_v, use_container_width=True)
+with col2:
+    st.subheader("💸 Istoric Cheltuieli")
+    st.dataframe(df_c, use_container_width=True)
