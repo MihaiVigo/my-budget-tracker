@@ -15,28 +15,37 @@ def incarca_date(nume_tab):
     try:
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
-            return pd.DataFrame(response.json())
+            date_json = response.json()
+            if date_json:  # Verificăm dacă JSON-ul nu este gol
+                return pd.DataFrame(date_json)
     except:
         pass
-    return pd.DataFrame()
+    return pd.DataFrame(columns=['data', 'suma', 'descriere'])
 
 def trimite_date(nume_tab, data, suma, desc):
     url = f"{BASE_API_URL}?sheet={nume_tab}"
     payload = {"data": [{"data": data, "suma": int(suma), "descriere": desc}]}
-    res = requests.post(url, json=payload)
-    return res.status_code == 201
+    try:
+        res = requests.post(url, json=payload, timeout=10)
+        return res.status_code == 201
+    except:
+        return False
 
 def curata_tot_tabelul(nume_tab):
     """Șterge toate datele dintr-un tab folosind un query de tip 'mai mare de -1'"""
     url = f"{BASE_API_URL}/suma/>/-1?sheet={nume_tab}"
-    res = requests.delete(url)
-    return res.status_code == 200
+    try:
+        res = requests.delete(url, timeout=10)
+        return res.status_code == 200
+    except:
+        return False
 
-# --- CONFIGURARE TIMP (Mutat sus pentru a fi disponibil la filtrare) ---
-data_selectata = date.today() # Valoarea implicită din sistem
+# --- CONFIGURARE TIMP (Inițializare timpurie și sigură) ---
+# Setăm variabile implicite globale în caz că utilizatorul nu schimbă nimic în sidebar
+data_selectata = date.today()
 nr_zile_luna = calendar.monthrange(data_selectata.year, data_selectata.month)[1]
 
-# --- SIDEBAR (Interfața de control) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ Administrare")
 
@@ -56,7 +65,7 @@ with st.sidebar:
                     trimite_date("venituri", data_selectata.strftime("%Y-%m-%d"), v_suma, v_desc)
                     st.rerun()
 
-    # 3. Adaugă Cheltuială - DESCHIS (Implicit)
+    # 3. Adaugă Cheltuială
     with st.expander("💸 Adaugă Cheltuială", expanded=True):
         with st.form("cheltuiala_noua", clear_on_submit=True):
             c_suma = st.number_input("Sumă (RON):", min_value=0, step=1)
@@ -80,33 +89,37 @@ with st.sidebar:
             st.success("Tabelul de cheltuieli a fost golit!")
             st.rerun()
 
-# --- PREGĂTIRE ȘI FILTRARE DATE (DOAR LUNA CURENTĂ) ---
+# --- DESCĂRCARE ȘI FILTRARE DATE ---
 df_v_raw = incarca_date("venituri")
 df_c_raw = incarca_date("cheltuieli")
 
-# Filtrare strictă pentru luna și anul selectat
 luna_tinta = data_selectata.month
 an_tinta = data_selectata.year
 
 def filtreaza_luna_curenta(df):
+    # Dacă tabelul e complet gol sau nu are structura corectă, returnăm un df gol standardizat
     if df.empty or 'data' not in df.columns:
         return pd.DataFrame(columns=['data', 'suma', 'descriere'])
     
-    # Convertim temporar coloana în format datetime pentru izolare
+    # Ne asigurăm că eliminăm eventualele rânduri complet goale din Google Sheets
+    df = df.dropna(subset=['data'])
+    
+    # Convertim coloana text în obiecte Datetime pentru a putea extrage luna/anul
     df['data_dt'] = pd.to_datetime(df['data'], errors='coerce')
     
-    # Filtrare
+    # Filtrare după luna și anul selectat
     masca = (df['data_dt'].dt.month == luna_tinta) & (df['data_dt'].dt.year == an_tinta)
     df_filtrat = df[masca].copy()
     
-    # Curățăm coloana temporară
+    # Ștergem coloana ajutătoare
     df_filtrat = df_filtrat.drop(columns=['data_dt'])
     return df_filtrat
 
+# Aplicăm filtrarea
 df_v = filtreaza_luna_curenta(df_v_raw)
 df_c = filtreaza_luna_curenta(df_c_raw)
 
-# --- LOGICA DE CALCUL SPECIFICĂ LUNII CURENTE ---
+# --- CALCUL LOGIC (Cu conversie numerică obligatorie) ---
 total_venituri_luna = int(pd.to_numeric(df_v['suma'], errors='coerce').sum()) if not df_v.empty else 0
 total_cheltuieli_luna = int(pd.to_numeric(df_c['suma'], errors='coerce').sum()) if not df_c.empty else 0
 
