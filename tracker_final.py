@@ -32,14 +32,11 @@ def curata_tot_tabelul(nume_tab):
     res = requests.delete(url)
     return res.status_code == 200
 
-# --- LOGICA DE CALCUL DATE ---
-df_v = incarca_date("venituri")
-df_c = incarca_date("cheltuieli")
+# --- CONFIGURARE TIMP (Mutat sus pentru a fi disponibil la filtrare) ---
+data_selectata = date.today() # Valoarea implicită din sistem
+nr_zile_luna = calendar.monthrange(data_selectata.year, data_selectata.month)[1]
 
-total_venituri = int(pd.to_numeric(df_v['suma'], errors='coerce').sum()) if not df_v.empty else 0
-total_cheltuieli = int(pd.to_numeric(df_c['suma'], errors='coerce').sum()) if not df_c.empty else 0
-
-# --- SIDEBAR ---
+# --- SIDEBAR (Interfața de control) ---
 with st.sidebar:
     st.title("⚙️ Administrare")
 
@@ -71,7 +68,7 @@ with st.sidebar:
 
     st.divider()
     
-    # 4. RESET TOTAL (Funcția care a confirmat că merge)
+    # 4. RESET TOTAL
     st.subheader("🚨 Resetare Date")
     if st.button("Șterge Toate VENITURILE"):
         if curata_tot_tabelul("venituri"):
@@ -83,14 +80,43 @@ with st.sidebar:
             st.success("Tabelul de cheltuieli a fost golit!")
             st.rerun()
 
-# --- CALCUL LOGIC ---
+# --- PREGĂTIRE ȘI FILTRARE DATE (DOAR LUNA CURENTĂ) ---
+df_v_raw = incarca_date("venituri")
+df_c_raw = incarca_date("cheltuieli")
+
+# Filtrare strictă pentru luna și anul selectat
+luna_tinta = data_selectata.month
+an_tinta = data_selectata.year
+
+def filtreaza_luna_curenta(df):
+    if df.empty or 'data' not in df.columns:
+        return pd.DataFrame(columns=['data', 'suma', 'descriere'])
+    
+    # Convertim temporar coloana în format datetime pentru izolare
+    df['data_dt'] = pd.to_datetime(df['data'], errors='coerce')
+    
+    # Filtrare
+    masca = (df['data_dt'].dt.month == luna_tinta) & (df['data_dt'].dt.year == an_tinta)
+    df_filtrat = df[masca].copy()
+    
+    # Curățăm coloana temporară
+    df_filtrat = df_filtrat.drop(columns=['data_dt'])
+    return df_filtrat
+
+df_v = filtreaza_luna_curenta(df_v_raw)
+df_c = filtreaza_luna_curenta(df_c_raw)
+
+# --- LOGICA DE CALCUL SPECIFICĂ LUNII CURENTE ---
+total_venituri_luna = int(pd.to_numeric(df_v['suma'], errors='coerce').sum()) if not df_v.empty else 0
+total_cheltuieli_luna = int(pd.to_numeric(df_c['suma'], errors='coerce').sum()) if not df_c.empty else 0
+
 ziua_nr = data_selectata.day
-alocatie_zilnica = int(total_venituri / nr_zile_luna) if total_venituri > 0 else 0
+alocatie_zilnica = int(total_venituri_luna / nr_zile_luna) if total_venituri_luna > 0 else 0
 buget_teoretic_pana_azi = alocatie_zilnica * ziua_nr
-sold_disponibil_azi = buget_teoretic_pana_azi - total_cheltuieli
+sold_disponibil_azi = buget_teoretic_pana_azi - total_cheltuieli_luna
 
 # --- AFIȘARE REZULTATE ---
-st.title("⚖️ Status Buget Zilnic")
+st.title("⚖️ Status Buget - Luna Curentă")
 
 # Afișare buget principal
 if sold_disponibil_azi >= 0:
@@ -100,22 +126,22 @@ else:
 
 st.divider()
 
-# Tabele de vizualizare simplă
+# Tabele de vizualizare pentru luna curentă
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📋 Venituri")
+    st.subheader("📋 Venituri (Luna Curentă)")
     if not df_v.empty:
         st.dataframe(df_v[['data', 'descriere', 'suma']], use_container_width=True)
     else:
-        st.caption("Niciun venit salvat.")
+        st.caption("Niciun venit salvat în această lună.")
 
 with col2:
-    st.subheader("💸 Cheltuieli")
+    st.subheader("💸 Cheltuieli (Luna Curentă)")
     if not df_c.empty:
         st.dataframe(df_c[['data', 'descriere', 'suma']], use_container_width=True)
     else:
-        st.caption("Nicio cheltuială salvată.")
+        st.caption("Nicio cheltuială salvată în această lună.")
 
 st.divider()
-st.caption(f"Venit total: {total_venituri} RON | Cheltuieli totale: {total_cheltuieli} RON | Alocație fixă: {alocatie_zilnica} RON/zi")
+st.caption(f"Venit lună: {total_venituri_luna} RON | Cheltuieli lună: {total_cheltuieli_luna} RON | Alocație fixă: {alocatie_zilnica} RON/zi")
